@@ -15,7 +15,7 @@ library(caret)
 
 # Paso 2: Cargar el dataset
 # Se carga los datos directamente desde el repositorio de GitHub.
-url <- "https://github.com/ColTrasplantes/CRA/blob/main/cirrhosis.csv"
+url <- "https://raw.githubusercontent.com/ColTrasplantes/CRA/main/cirrhosis.csv"
 cirrhosis <- read.csv("cirrhosis.csv")
 
 # Paso 3: Filtrar variables necesarias
