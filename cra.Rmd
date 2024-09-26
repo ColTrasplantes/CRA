@@ -13,10 +13,9 @@ library(Matrix)
 library(car)
 library(caret)
 
-# Paso 2: Cargar el dataset
-# Se carga los datos directamente desde el repositorio de GitHub.
-url <- "https://github.com/ColTrasplantes/CRA/raw/main/cirrhosis.csv"
-cirrhosis <- read.csv("cirrhosis.csv")
+# Paso 2: Cargar el dataset directamente desde GitHub
+url <- "https://raw.githubusercontent.com/ColTrasplantes/CRA/main/cirrhosis.csv"
+cirrhosis <- read.csv(url)
 
 # Paso 3: Filtrar variables necesarias
 cirrhosis <- cirrhosis[, c("Status", "N_Days", "Drug", "Age", "Sex", 
