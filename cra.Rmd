@@ -1,0 +1,112 @@
+---
+title: "Riesgos que compiten"
+author: "Colombiana de Trasplantes"
+date: "2024-08-19"
+output: html_document
+---
+
+```{r}
+# Paso 1: Cargar las bibliotecas necesarias
+library(survival)
+library(cmprsk)
+library(Matrix)
+library(car)
+library(caret)
+
+# Paso 2: Cargar el dataset
+# Se carga los datos directamente desde el repositorio de GitHub.
+url <- "https://github.com/ColTrasplantes/CRA/blob/main/cirrhosis.csv"
+cirrhosis <- read.csv("cirrhosis.csv")
+
+# Paso 3: Filtrar variables necesarias
+cirrhosis <- cirrhosis[, c("Status", "N_Days", "Drug", "Age", "Sex", 
+                           "Ascites", "Hepatomegaly", "Spiders", "Edema")]
+
+# Paso 4: Convertir variables categóricas a factores
+cirrhosis$Status <- factor(cirrhosis$Status, levels = c("C", "CL", "D"))
+cirrhosis$Drug <- factor(cirrhosis$Drug)
+cirrhosis$Sex <- factor(cirrhosis$Sex)
+cirrhosis$Ascites <- factor(cirrhosis$Ascites, levels = c("N", "Y"))
+cirrhosis$Hepatomegaly <- factor(cirrhosis$Hepatomegaly, levels = c("N", "Y"))
+cirrhosis$Spiders <- factor(cirrhosis$Spiders, levels = c("N", "Y"))
+cirrhosis$Edema <- factor(cirrhosis$Edema, levels = c("N", "S", "Y"))
+
+# Paso 5: Imputar valores faltantes con la moda
+impute_moda <- function(x) {
+  moda <- names(which.max(table(x)))
+  x[is.na(x)] <- moda
+  return(x)
+}
+cirrhosis$Drug <- impute_moda(cirrhosis$Drug)
+cirrhosis$Ascites <- impute_moda(cirrhosis$Ascites)
+cirrhosis$Hepatomegaly <- impute_moda(cirrhosis$Hepatomegaly)
+cirrhosis$Spiders <- impute_moda(cirrhosis$Spiders)
+cirrhosis$Edema <- impute_moda(cirrhosis$Edema)
+
+# Paso 5.1: Simplificar Edema a binaria
+cirrhosis$Edema_bin <- factor(ifelse(cirrhosis$Edema == "N", "N", "Y"),
+                              levels = c("N", "Y"))
+
+# Paso 6: Estandarizar la variable Age
+cirrhosis$Age_scaled <- scale(cirrhosis$Age)
+
+# Paso 7: Generar matriz de diseño
+covariables <- model.matrix(~ Drug + Age_scaled + Sex + Hepatomegaly + Edema_bin, data = cirrhosis)[, -1]
+
+# Paso 8: Verificar multicolinealidad y varianza
+nzv <- nearZeroVar(covariables, saveMetrics = TRUE)
+print(nzv)
+
+# Eliminar variables con varianza cero
+covariables_reduced <- covariables[, !nzv$zeroVar]
+
+vif_values <- vif(lm(N_Days ~ ., data = data.frame(N_Days = cirrhosis$N_Days, covariables_reduced)))
+print(vif_values)
+
+# Paso 9: Asegurarse de que las variables numéricas no contienen valores problemáticos
+cirrhosis$N_Days <- as.numeric(cirrhosis$N_Days)
+
+# Paso 10: Definir el evento de interés y los eventos competitivos
+# 0 = Censura, 1 = Muerte, 2 = Trasplante
+event <- ifelse(cirrhosis$Status == "D", 1, ifelse(cirrhosis$Status == "CL", 2, 0))
+
+# Verificar valores perdidos
+sum(is.na(cirrhosis$N_Days))
+sum(is.na(event))
+sum(is.na(covariables_reduced))
+
+# Paso 11: Ajustar el modelo de Fine-Gray
+fg_model <- crr(
+  ftime = cirrhosis$N_Days,
+  fstatus = event,
+  cov1 = covariables_reduced,
+  maxiter = 1000
+)
+
+# Paso 12: Resumir el modelo
+if (!fg_model$converged) {
+  cat("El modelo no convergió.\n")
+} else {
+  summary(fg_model)
+}
+
+# Paso 13: Generar y graficar las curvas de incidencia acumulada
+ci <- cuminc(ftime = cirrhosis$N_Days, fstatus = event, group = cirrhosis$Drug)
+
+cols <- c("blue", "red", "blue", "red")
+lty <- c(1, 1, 2, 2)
+
+plot(ci, lty = lty, col = cols, xlab = "Días", ylab = "Incidencia Acumulada")
+
+legend("topright", 
+       legend = c("Muerte (D-penicillamine)", "Muerte (Placebo)", 
+                  "Trasplante (D-penicillamine)", "Trasplante (Placebo)"), 
+       col = c("blue", "red", "blue", "red"), lty = c(1, 1, 2, 2))
+
+# Interpretación:
+# La gráfica muestra la incidencia acumulada de muerte y trasplante en función del tiempo,
+# diferenciando entre los grupos de tratamiento.
+# Observa cómo las curvas se separan, indicando diferencias potenciales en los riesgos.
+
+```
+
