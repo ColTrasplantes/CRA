@@ -1,111 +1,320 @@
 ---
-title: "Riesgos que compiten"
+title: "Análisis de Riesgos Competitivos"
 author: "Colombiana de Trasplantes"
-date: "2024-08-19"
-output: html_document
+date: "2025-07-01"
+output:
+  pdf_document: default
+  html_document: default
 ---
 
-```{r}
-# Paso 1: Cargar las bibliotecas necesarias
-library(survival)
-library(cmprsk)
-library(Matrix)
-library(car)
-library(caret)
+## Material Suplementario: Guía para el análisis de riesgos competitivos utilizando el modelo Fine-Gray
 
-# Paso 2: Cargar el dataset directamente desde GitHub
-url <- "https://raw.githubusercontent.com/ColTrasplantes/CRA/main/cirrhosis.csv"
-cirrhosis <- read.csv(url)
+A continuación, se presenta una guía paso a paso para realizar un análisis de supervivencia en presencia de riesgos competitivos utilizando el modelo de Fine-Gray. El objetivo es ilustrar claramente cómo utilizar este modelo, desde la preparación de los datos hasta la interpretación de los resultados, resaltando diferencias con métodos clásicos.
 
-# Paso 3: Filtrar variables necesarias
-cirrhosis <- cirrhosis[, c("Status", "N_Days", "Drug", "Age", "Sex", 
-                           "Ascites", "Hepatomegaly", "Spiders", "Edema")]
+---
 
-# Paso 4: Convertir variables categóricas a factores
-cirrhosis$Status <- factor(cirrhosis$Status, levels = c("C", "CL", "D"))
-cirrhosis$Drug <- factor(cirrhosis$Drug)
-cirrhosis$Sex <- factor(cirrhosis$Sex)
-cirrhosis$Ascites <- factor(cirrhosis$Ascites, levels = c("N", "Y"))
-cirrhosis$Hepatomegaly <- factor(cirrhosis$Hepatomegaly, levels = c("N", "Y"))
-cirrhosis$Spiders <- factor(cirrhosis$Spiders, levels = c("N", "Y"))
-cirrhosis$Edema <- factor(cirrhosis$Edema, levels = c("N", "S", "Y"))
+### Paso 0: Carga e instalación de paquetes necesarios
 
-# Paso 5: Imputar valores faltantes con la moda
-impute_moda <- function(x) {
-  moda <- names(which.max(table(x)))
-  x[is.na(x)] <- moda
-  return(x)
-}
-cirrhosis$Drug <- impute_moda(cirrhosis$Drug)
-cirrhosis$Ascites <- impute_moda(cirrhosis$Ascites)
-cirrhosis$Hepatomegaly <- impute_moda(cirrhosis$Hepatomegaly)
-cirrhosis$Spiders <- impute_moda(cirrhosis$Spiders)
-cirrhosis$Edema <- impute_moda(cirrhosis$Edema)
+Antes de iniciar, es necesario contar con los siguientes paquetes en R, que permiten la manipulación de datos, ajuste y validación de modelos:
 
-# Paso 5.1: Simplificar Edema a binaria
-cirrhosis$Edema_bin <- factor(ifelse(cirrhosis$Edema == "N", "N", "Y"),
-                              levels = c("N", "Y"))
+- **`survival`**: análisis básicos de supervivencia.
+- **`cmprsk`**: ajuste de modelos de riesgos competitivos (Fine-Gray).
+- **`Matrix`**: operaciones matriciales eficientes.
+- **`car`**: funciones estadísticas complementarias.
+- **`caret`**: preprocesamiento y validación de modelos estadísticos.
 
-# Paso 6: Estandarizar la variable Age
-cirrhosis$Age_scaled <- scale(cirrhosis$Age)
-
-# Paso 7: Generar matriz de diseño
-covariables <- model.matrix(~ Drug + Age_scaled + Sex + Hepatomegaly + Edema_bin, data = cirrhosis)[, -1]
-
-# Paso 8: Verificar multicolinealidad y varianza
-nzv <- nearZeroVar(covariables, saveMetrics = TRUE)
-print(nzv)
-
-# Eliminar variables con varianza cero
-covariables_reduced <- covariables[, !nzv$zeroVar]
-
-vif_values <- vif(lm(N_Days ~ ., data = data.frame(N_Days = cirrhosis$N_Days, covariables_reduced)))
-print(vif_values)
-
-# Paso 9: Asegurarse de que las variables numéricas no contienen valores problemáticos
-cirrhosis$N_Days <- as.numeric(cirrhosis$N_Days)
-
-# Paso 10: Definir el evento de interés y los eventos competitivos
-# 0 = Censura, 1 = Muerte, 2 = Trasplante
-event <- ifelse(cirrhosis$Status == "D", 1, ifelse(cirrhosis$Status == "CL", 2, 0))
-
-# Verificar valores perdidos
-sum(is.na(cirrhosis$N_Days))
-sum(is.na(event))
-sum(is.na(covariables_reduced))
-
-# Paso 11: Ajustar el modelo de Fine-Gray
-fg_model <- crr(
-  ftime = cirrhosis$N_Days,
-  fstatus = event,
-  cov1 = covariables_reduced,
-  maxiter = 1000
-)
-
-# Paso 12: Resumir el modelo
-if (!fg_model$converged) {
-  cat("El modelo no convergió.\n")
-} else {
-  summary(fg_model)
-}
-
-# Paso 13: Generar y graficar las curvas de incidencia acumulada
-ci <- cuminc(ftime = cirrhosis$N_Days, fstatus = event, group = cirrhosis$Drug)
-
-cols <- c("blue", "red", "blue", "red")
-lty <- c(1, 1, 2, 2)
-
-plot(ci, lty = lty, col = cols, xlab = "Días", ylab = "Incidencia Acumulada")
-
-legend("topright", 
-       legend = c("Muerte (D-penicillamine)", "Muerte (Placebo)", 
-                  "Trasplante (D-penicillamine)", "Trasplante (Placebo)"), 
-       col = c("blue", "red", "blue", "red"), lty = c(1, 1, 2, 2))
-
-# Interpretación:
-# La gráfica muestra la incidencia acumulada de muerte y trasplante en función del tiempo,
-# diferenciando entre los grupos de tratamiento.
-# Observa cómo las curvas se separan, indicando diferencias potenciales en los riesgos.
-
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+# Instalar y cargar los paquetes necesarios
+paquetes <- c("survival", "cmprsk", "Matrix", "car", "caret")
+instalar <- setdiff(paquetes, rownames(installed.packages()))
+if(length(instalar)) install.packages(instalar)
+lapply(paquetes, library, character.only = TRUE)
 ```
 
+---
+
+### Paso 1: Preprocesamiento de datos
+
+Para asegurar la validez del análisis, se recomienda seguir estos pasos en el preprocesamiento:
+
+- **Importación y limpieza**: cargar la base desde una fuente externa, seleccionando variables relevantes y verificando su calidad.
+- **Codificación**: transformar variables categóricas a factores y simplificar niveles según necesidad.
+- **Imputación**: reemplazar valores faltantes categóricos con la moda.
+- **Estandarización**: escalar variables numéricas continuas para facilitar la interpretación de los resultados.
+
+Este proceso garantiza la estabilidad y robustez de los modelos estadísticos posteriores.
+
+```{r datos, echo=FALSE}
+# Importar la base de datos directamente desde GitHub
+cirrhosis <- read.csv("https://raw.githubusercontent.com/ColTrasplantes/CRA/main/cirrhosis.csv")
+
+# Codificar variables categóricas como factores
+cols_fct <- c("Drug", "Sex", "Ascites", "Hepatomegaly", "Spiders", "Edema")
+for (v in cols_fct) cirrhosis[[v]] <- as.factor(cirrhosis[[v]])
+cirrhosis$Status <- factor(cirrhosis$Status, levels = c("C", "CL", "D"))
+
+# Simplificar 'Edema' a variable binaria (presente/ausente)
+cirrhosis$Edema_bin <- factor(ifelse(cirrhosis$Edema == "N", "N", "Y"), c("N", "Y"))
+
+# Estandarizar la variable 'Age'
+cirrhosis$Age_scaled <- scale(cirrhosis$Age)
+
+# Función para imputar valores faltantes con la moda
+impute_moda <- function(x) { x[is.na(x)] <- names(which.max(table(x))); x }
+
+# Imputar valores ausentes en variables categóricas
+for (v in c("Drug", "Ascites", "Hepatomegaly", "Spiders", "Edema")) {
+  cirrhosis[[v]] <- impute_moda(cirrhosis[[v]])
+}
+```
+
+---
+
+### Paso 2: Análisis de riesgos competitivos (Modelo Fine-Gray)
+
+Este análisis considera explícitamente la competencia entre eventos excluyentes, por ejemplo, muerte y trasplante hepático. Los pasos a seguir son:
+
+- **Matriz de covariables**: se construye utilizando las variables relevantes para el análisis.
+- **Codificación del evento**: se define claramente la variable evento (1 = muerte, 2 = trasplante, 0 = censura).
+- **Modelo Fine-Gray**: se ajusta con la función `crr()` del paquete `cmprsk`.
+- **Curvas de incidencia acumulada (CIF)**: se generan con la función `cuminc()`.
+- **Comparación estadística entre grupos**: se utiliza la prueba de Gray, integrada en `cuminc()`.
+
+```{r finegray, echo=TRUE, message=FALSE, warning=FALSE}
+# Matriz de covariables ajustada
+X <- model.matrix(~ Drug + Age_scaled + Sex + Hepatomegaly + Edema_bin, data = cirrhosis)[, -1]
+nzv <- nearZeroVar(X)
+if(length(nzv)) X <- X[, -nzv, drop = FALSE]
+
+# Definir el evento de interés
+event <- ifelse(cirrhosis$Status == "D", 1, ifelse(cirrhosis$Status == "CL", 2, 0))
+
+# Ajustar modelo Fine-Gray
+fg <- crr(ftime = cirrhosis$N_Days, fstatus = event, cov1 = X)
+
+# Calcular curvas CIF
+ci <- cuminc(ftime = cirrhosis$N_Days, fstatus = event, group = cirrhosis$Drug)
+
+# Renombrar curvas para facilitar lectura
+names(ci)[1:4] <- c(
+  "Muerte (D-penicilamina)", "Muerte (Placebo)",
+  "Trasplante (D-penicilamina)", "Trasplante (Placebo)"
+)
+
+# Valor p para comparación de muerte entre grupos
+p_val <- ci$`Tests`[1, "pv"]
+
+# Gráfico de CIF
+plot(ci, 
+     lty = c(1, 1, 2, 2), 
+     col = c("#0072B2", "#D55E00", "#0072B2", "#D55E00"),
+     xlab = "Días", 
+     ylab = "Incidencia acumulada",
+     main = "Incidencia acumulada de muerte y trasplante\npor grupo de tratamiento"
+)
+
+# Mostrar valor p en esquina superior derecha
+usr <- par("usr")
+text(x = usr[2] - 0.02 * (usr[2] - usr[1]), 
+     y = usr[4] - 0.03 * (usr[4] - usr[3]),
+     labels = paste0("p = ", format.pval(p_val, digits = 3, eps = 0.001)),
+     cex = 1.2, font = 2, adj = c(1,1))
+```
+
+**Figura 1.** Curvas de incidencia acumulada (CIF) para muerte y trasplante por grupo de tratamiento. La prueba de Gray no mostró diferencias significativas (p = 0.748).
+
+**Interpretación**
+
+La Figura 1 permite evaluar cómo evolucionan en el tiempo los riesgos de eventos excluyentes. La ausencia de diferencias significativas indica que el tratamiento no afectó la incidencia acumulada de muerte o trasplante, mostrando la utilidad del modelo Fine-Gray para estudios clínicos con múltiples eventos posibles.
+
+---
+
+### Paso 3: Resultados del modelo Fine-Gray
+
+Se presentan los resultados del modelo en términos de subhazard ratios (sHR) ajustados con intervalos de confianza del 95 % y valores p.
+
+```{r fg_summary, echo=TRUE, message=FALSE, warning=FALSE}
+# Extraer resumen del modelo Fine-Gray
+fg_summary <- summary(fg)
+coefs <- as.data.frame(fg_summary$coef)
+sHR <- exp(coefs$coef)
+IC_inf <- exp(coefs$coef - 1.96 * coefs$`se(coef)`)
+IC_sup <- exp(coefs$coef + 1.96 * coefs$`se(coef)`)
+
+# Calcular p-valor si no está presente en el resumen
+if (!"p" %in% tolower(colnames(coefs))) {
+  z <- coefs$coef / coefs$`se(coef)`
+  pval <- 2 * pnorm(-abs(z))
+} else {
+  pval <- coefs[, which(tolower(colnames(coefs)) == "p")]
+}
+
+# Nombres amigables para las variables
+nombres_legibles <- c(
+  "Grupo: Placebo",
+  "Edad (escalada)",
+  "Sexo masculino",
+  "Hepatomegalia (presente)",
+  "Edema (presente)"
+)
+
+# Crear tabla con nombres claros
+tabla_fg <- data.frame(
+  Variable = nombres_legibles,
+  `sHR ajustado (IC 95%)` = sprintf("%.2f (%.2f–%.2f)", sHR, IC_inf, IC_sup),
+  `Valor p` = format.pval(pval, digits = 2, eps = 0.001),
+  check.names = FALSE,
+  row.names = NULL
+)
+
+knitr::kable(
+  tabla_fg,
+  caption = "Tabla 1. Subhazard ratios (sHR) ajustados del modelo Fine-Gray para muerte (evento de interés)."
+)
+```
+
+**Tabla 1.** Subhazard ratios (sHR) ajustados del modelo Fine-Gray para muerte.
+
+**Interpretación**
+
+La Tabla 1 muestra que edad avanzada, hepatomegalia y edema clínico se asocian significativamente a mayor probabilidad acumulada de muerte. El sHR interpreta específicamente la probabilidad acumulada del evento en presencia de eventos competitivos:
+
+- **sHR > 1** indica mayor riesgo acumulado.
+- **sHR < 1** indica menor riesgo acumulado.
+
+---
+
+### Paso 4: Comparación con métodos tradicionales de supervivencia (Kaplan-Meier y Nelson-Aalen)
+
+Con el fin de ilustrar cómo difieren los resultados al considerar o no riesgos competitivos, se realizaron análisis clásicos:
+
+- **Curvas de Kaplan-Meier** (KM): evalúan supervivencia estimada sin considerar eventos competitivos.
+- **Curvas de Nelson-Aalen** (NA): evalúan riesgo acumulado sin considerar eventos competitivos.
+- **Modelo de Cox**: estima riesgo instantáneo (hazard) de muerte sin considerar competencia de eventos.
+
+La comparación visual y estadística permite reconocer diferencias metodológicas fundamentales.
+
+```{r cox_km_na, echo=FALSE, message=FALSE, warning=FALSE}
+# Evento para Cox/KM/NA: 1 = muerte, 0 = trasplante o censura
+cox_event <- ifelse(cirrhosis$Status == "D", 1, 0)
+
+# Kaplan-Meier y Nelson-Aalen por grupo de tratamiento
+km_fit <- survfit(Surv(N_Days, cox_event) ~ Drug, data = cirrhosis)
+na_fit <- survfit(Surv(N_Days, cox_event) ~ Drug, data = cirrhosis, type = "fh")
+
+# Valor p log-rank
+logrank <- survdiff(Surv(N_Days, cox_event) ~ Drug, data = cirrhosis)
+p_val <- 1 - pchisq(logrank$chisq, df = length(logrank$n) - 1)
+
+# Ajuste de márgenes y fuentes pequeñas
+par(mfrow = c(1, 2), mar = c(4, 5.5, 4, 2), oma = c(0, 1, 1.5, 0)) # margen interno y externo
+
+# Figura 1: Kaplan-Meier
+plot(
+  km_fit, 
+  col = c("#0072B2", "#D55E00"), lty = 1, lwd = 1.5,
+  xlab = "Días", 
+  ylab = "Supervivencia estimada\n(Kaplan-Meier)", 
+  main = "Kaplan-Meier por grupo de tratamiento",
+  cex.main = 0.85, cex.lab = 0.85, cex.axis = 0.85,
+  las = 1,
+  xlim = c(0, max(cirrhosis$N_Days, na.rm = TRUE)),
+  ylim = c(0, 1.05)
+)
+legend("bottomleft", legend = c("D-penicilamina", "Placebo"),
+       col = c("#0072B2", "#D55E00"), lty = 1, lwd = 1.5, cex = 0.85, bty = "n")
+usr1 <- par("usr")
+text(x = (usr1[1] + usr1[2]) / 4, 
+     y = 0.5,
+     labels = paste0("p = ", format.pval(p_val, digits = 3, eps = 0.001)),
+     cex = 1, font = 2)
+
+# Figura 2: Nelson-Aalen
+plot(
+  na_fit, fun = "cumhaz",
+  col = c("#0072B2", "#D55E00"), lty = 1, lwd = 1.5,
+  xlab = "Días", 
+  ylab = "Riesgo acumulado\n(Nelson-Aalen)", 
+  main = "Nelson-Aalen por grupo de tratamiento",
+  cex.main = 0.85, cex.lab = 0.85, cex.axis = 0.85,
+  las = 1,
+  xlim = c(0, max(cirrhosis$N_Days, na.rm = TRUE)),
+  ylim = c(0, max(na_fit$cumhaz, na.rm = TRUE) * 1.05)
+)
+legend("topleft", legend = c("D-penicilamina", "Placebo"),
+       col = c("#0072B2", "#D55E00"), lty = 1, lwd = 1.5, cex = 0.85, bty = "n")
+usr2 <- par("usr")
+text(x = (usr2[1] + usr2[2]) / 4, 
+     y = 0.5,
+     labels = paste0("p = ", format.pval(p_val, digits = 3, eps = 0.001)),
+     cex = 1, font = 2)
+
+par(mfrow = c(1,1))
+```
+
+**Figura 2.** Curvas Kaplan-Meier (supervivencia) y Nelson-Aalen (riesgo acumulado) por tratamiento, sin diferencias estadísticamente significativas según la prueba log-rank (p = 0.702).
+
+**Interpretación**
+
+Aunque los métodos tradicionales son útiles para describir riesgos en estudios simples de supervivencia, no capturan adecuadamente la competencia entre eventos. Esto puede afectar la interpretación de los resultados clínicos, lo que subraya la importancia del modelo Fine-Gray en estudios con múltiples eventos posibles.
+
+---
+
+### Paso 5: Resultados del modelo de Cox proporcional
+
+Para complementar el análisis, se muestran los resultados del modelo de Cox que considera el riesgo instantáneo de muerte (hazard ratio, HR) sin competencia por trasplante.
+
+```{r cox_summary, echo=TRUE}
+# Ajustar modelo de Cox proporcional de riesgos
+cox_model <- coxph(Surv(N_Days, cox_event) ~ Drug + Age_scaled + Sex + Hepatomegaly + Edema_bin, data = cirrhosis)
+
+# Extraer resumen
+cox_summary <- summary(cox_model)
+coefs_cox <- as.data.frame(cox_summary$coefficients)
+se_cox <- coefs_cox$`se(coef)`
+HR <- exp(coefs_cox$coef)
+IC_inf <- exp(coefs_cox$coef - 1.96 * se_cox)
+IC_sup <- exp(coefs_cox$coef + 1.96 * se_cox)
+pval_cox <- coefs_cox$`Pr(>|z|)`
+
+# Nombres legibles
+nombres_legibles <- c(
+  "Grupo: Placebo",
+  "Edad (escalada)",
+  "Sexo masculino",
+  "Hepatomegalia (presente)",
+  "Edema (presente)"
+)
+
+# Tabla final
+tabla_cox <- data.frame(
+  Variable = nombres_legibles,
+  `HR ajustado (IC 95%)` = sprintf("%.2f (%.2f–%.2f)", HR, IC_inf, IC_sup),
+  `Valor p` = format.pval(pval_cox, digits = 2, eps = 0.001),
+  check.names = FALSE,
+  row.names = NULL
+)
+
+# Mostrar tabla
+knitr::kable(
+  tabla_cox,
+  caption = "Tabla 2. Hazard ratios (HR) ajustados del modelo de Cox para muerte (evento de interés)."
+)
+```
+
+**Tabla 2.** Hazard ratios (HR) ajustados del modelo de Cox para muerte.
+
+**Interpretación**
+
+La Tabla 2 muestra resultados consistentes con el modelo Fine-Gray, destacando asociaciones significativas de edad avanzada, hepatomegalia y edema clínico con mayor riesgo instantáneo de muerte. Sin embargo, a diferencia del modelo Fine-Gray, el modelo de Cox evalúa el riesgo instantáneo en cada momento del tiempo sin considerar eventos competitivos:
+
+- **HR > 1** implica mayor riesgo instantáneo del evento.
+- **HR < 1** implica menor riesgo instantáneo.
+
+Esta comparación permite entender cómo distintas metodologías afectan la interpretación clínica y epidemiológica, resaltando la importancia de seleccionar modelos adecuados según la naturaleza de los datos y eventos.
+
+---
+
+### Conclusión metodológica
+
+Comparar modelos clásicos de supervivencia con el modelo Fine-Gray permite ilustrar claramente la importancia de considerar la competencia de eventos en estudios clínicos complejos. El modelo Fine-Gray brinda resultados más ajustados a la realidad clínica al integrar adecuadamente el riesgo competitivo en la estimación de riesgos acumulados, facilitando así decisiones clínicas más precisas e informadas.
